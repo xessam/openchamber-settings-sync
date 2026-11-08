@@ -1,0 +1,68 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--oc-font, sans-serif);
+  color: var(--oc-fg, inherit);
+  background: var(--oc-bg, transparent);
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 1rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.intro,
+#status,
+.notice {
+  color: var(--oc-muted, currentColor);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+#action {
+  margin: 1rem 0 0.5rem;
+}
+
+#sources {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+}
+
+.source-label {
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+
+.source-state {
+  color: var(--oc-muted, currentColor);
+  font-size: 0.8rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.notice {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--oc-border, currentColor);
+}

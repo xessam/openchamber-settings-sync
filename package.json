@@ -7,6 +7,33 @@
     "node": ">=18"
   },
   "scripts": {
+    "build": "npm run build:panel && npm run build:service",
+    "build:panel": "esbuild src/panel.js --bundle --format=iife --platform=browser --outfile=panel/main.js",
+    "build:service": "esbuild src/service-entry.js --bundle --format=esm --platform=node --outfile=service/main.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@openchamber/sdk": "^2.7.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.3.3"
+    },
+    "id": "openchamber-sync",
+    "name": "OpenChamber Sync",
+    "icon": "refresh-line",
+    "contributes": {
+      "panel": {
+        "entry": "panel/index.html"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host"
+      }
+    }
   }
 }
