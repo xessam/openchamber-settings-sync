@@ -116,3 +116,21 @@ export function sanitizeOpenCodeConfig(config) {
   if (!isRecord(config)) throw new TypeError('Expected an OpenCode config object');
   return sanitizeValue(config);
 }
+
+export function selectExtensionRepositories(extensionConfig) {
+  if (!isRecord(extensionConfig)) throw new TypeError('Expected an extension config object');
+  if (!isRecord(extensionConfig.gitOrigins)) return [];
+
+  const repositories = new Set();
+  for (const origin of Object.values(extensionConfig.gitOrigins)) {
+    if (!isRecord(origin) || typeof origin.url !== 'string') continue;
+    const sanitized = sanitizeString(origin.url);
+    try {
+      const url = new URL(sanitized);
+      if (url.protocol === 'https:' && url.hostname) repositories.add(url.toString());
+    } catch {
+      // Ignore invalid or local origins; they are not portable install sources.
+    }
+  }
+  return [...repositories].sort();
+}

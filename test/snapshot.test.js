@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { sanitizeOpenCodeConfig, selectPortablePreferences } from '../src/snapshot.js';
+import {
+  sanitizeOpenCodeConfig,
+  selectExtensionRepositories,
+  selectPortablePreferences,
+} from '../src/snapshot.js';
 
 test('selects only known portable preference fields', () => {
   const source = {
@@ -28,6 +32,31 @@ test('selects only known portable preference fields', () => {
 test('rejects malformed preference envelopes', () => {
   assert.throws(() => selectPortablePreferences(null), /preferences object/i);
   assert.throws(() => selectPortablePreferences({ version: 1, fields: [] }), /fields object/i);
+});
+
+test('exports extension repository URLs without machine paths or grants', () => {
+  const source = {
+    paths: ['/home/ivy/.config/openchamber/extensions/example'],
+    gitOrigins: {
+      '/home/ivy/.config/openchamber/extensions/example': {
+        url: 'https://github.com/acme/example',
+        gitIdentityId: 'machine-local-identity',
+      },
+      '/home/ivy/.config/openchamber/extensions/second': {
+        url: 'https://github.com/acme/second',
+      },
+      '/home/ivy/.config/openchamber/extensions/local': {
+        url: 'file:///home/ivy/dev/local-extension',
+      },
+    },
+    capabilityGrants: { example: ['service'] },
+    storageIds: { example: 'machine-local-storage-id' },
+  };
+
+  assert.deepEqual(selectExtensionRepositories(source), [
+    'https://github.com/acme/example',
+    'https://github.com/acme/second',
+  ]);
 });
 
 test('strips credentials and environment/header values from OpenCode config', () => {
