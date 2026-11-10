@@ -21,16 +21,25 @@ h1 {
   font-weight: 650;
 }
 
+h2 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .intro,
-#status,
+.helper,
+#repo-status,
+#preview-status,
 .notice {
   color: var(--oc-muted, currentColor);
   font-size: 0.875rem;
   line-height: 1.45;
 }
 
-#action {
-  margin: 1rem 0 0.5rem;
+#repo-action,
+#preview-action {
+  margin: 0.75rem 0 0.5rem;
 }
 
 #sources {

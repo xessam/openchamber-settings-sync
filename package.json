@@ -32,7 +32,10 @@
       },
       "service": {
         "entry": "service/main.js",
-        "runtime": "host"
+        "runtime": "host",
+        "permissions": {
+          "exec": ["git"]
+        }
       }
     }
   }

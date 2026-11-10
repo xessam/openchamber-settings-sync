@@ -9,10 +9,20 @@
   <body>
     <main id="root" aria-labelledby="title">
       <h1 id="title">OpenChamber Sync</h1>
-      <p class="intro">Review which portable settings are available to sync.</p>
-      <div id="action"></div>
-      <p id="status" role="status" aria-live="polite">Nothing has been read yet.</p>
-      <ul id="sources" aria-label="Sync sources"></ul>
+      <p class="intro">Connect a private repository, then preview the portable settings before syncing.</p>
+      <section aria-labelledby="repo-title">
+        <h2 id="repo-title">Configuration repository</h2>
+        <p class="helper">Uses this machine’s configured Git credentials. OpenChamber-managed Account/SSH identities are not available to the extension yet.</p>
+        <div id="repo-field"></div>
+        <div id="repo-action"></div>
+        <p id="repo-status" role="status" aria-live="polite">No repository tested.</p>
+      </section>
+      <section aria-labelledby="preview-title">
+        <h2 id="preview-title">Portable settings</h2>
+        <div id="preview-action"></div>
+        <p id="preview-status" role="status" aria-live="polite">Nothing has been read yet.</p>
+        <ul id="sources" aria-label="Sync sources"></ul>
+      </section>
       <p class="notice">This preview only reads local config. It does not upload or change anything.</p>
     </main>
     <script src="main.js"></script>

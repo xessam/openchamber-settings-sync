@@ -1,6 +1,9 @@
 import http from 'node:http';
 
 import { createLocalPreview } from './local-preview.js';
+import { probeGitHubRepo } from './repository.js';
+
+const MAX_REQUEST_BYTES = 4096;
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -10,7 +13,23 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-export function createServiceServer({ token, openChamberDir, openCodeDir }) {
+async function readJsonBody(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_REQUEST_BYTES) throw Object.assign(new Error(), { code: 'BODY_TOO_LARGE' });
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+function isRequestObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+export function createServiceServer({ token, openChamberDir, openCodeDir, gitProbe = probeGitHubRepo }) {
   if (typeof token !== 'string' || token.length === 0) {
     throw new TypeError('A service token is required');
   }
@@ -37,6 +56,34 @@ export function createServiceServer({ token, openChamberDir, openCodeDir }) {
         sendJson(response, 200, await createLocalPreview({ openChamberDir, openCodeDir }));
       } catch {
         sendJson(response, 503, { error: 'preview-unavailable' });
+      }
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/repository/test') {
+      let body;
+      try {
+        body = await readJsonBody(request);
+      } catch (error) {
+        sendJson(response, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: 'invalid-request' });
+        return;
+      }
+      if (!isRequestObject(body) || Object.keys(body).some((key) => key !== 'url')
+        || typeof body.url !== 'string') {
+        sendJson(response, 400, { error: 'invalid-request' });
+        return;
+      }
+      try {
+        const result = await gitProbe(body.url);
+        sendJson(response, 200, { accessible: true, repository: result.repository, url: result.url });
+      } catch (error) {
+        const code = error?.code;
+        const status = code === 'INVALID_REPOSITORY_URL' ? 400
+          : code === 'GIT_NOT_INSTALLED' ? 503
+            : code === 'GIT_TIMEOUT' ? 504 : 422;
+        const publicCode = code === 'INVALID_REPOSITORY_URL' ? 'invalid-repository-url'
+          : code === 'GIT_NOT_INSTALLED' ? 'git-not-installed'
+            : code === 'GIT_TIMEOUT' ? 'git-timeout' : 'git-access-failed';
+        sendJson(response, status, { error: publicCode });
       }
       return;
     }

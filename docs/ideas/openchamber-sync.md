@@ -40,16 +40,21 @@ Mechanics (v1):
 - Secrets: never sync OpenCode data/auth databases or legacy `auth.json`;
   `auth.json` exists on older installs, while current OpenCode can store
   credentials in its SQLite database. Strip config credentials defensively.
+- Git auth in v1: use the machine's configured Git credential helper; never
+  accept credentials in the remote URL or store a token in extension data.
+  OpenChamber-managed Account/SSH identities are not exposed by the public
+  extension SDK; using them needs a host-side Git API.
 - Apply: writes files; OpenChamber picks up on reload (verify — Open Q2)
 
 Implementation status: extension manifest, authenticated loopback service,
 local preview panel, source filters, and per-machine LWW/tombstone primitives
-are implemented and tested. Git transport and applying merged values remain
-unimplemented; the preview is read-only.
+are implemented and tested. The panel accepts a credential-free GitHub HTTPS
+URL and tests read access with non-interactive `git ls-remote`; this is
+read-only. Push/pull and applying merged values remain unimplemented.
 
 ## Key Assumptions to Validate
 - [ ] Extension `service` can push/pull a private repo — local service protocol
-      is implemented; Git credential behavior is still unverified
+      is implemented; credential-helper access to a private repo is unverified
 - [ ] Portable preference fields remain stable across OpenChamber updates
 - [ ] Per-machine LWW and tombstones converge under real concurrent edits
 - [ ] Machines' clocks within ~1s (NTP) — `date` on both
@@ -63,6 +68,8 @@ once the configuration repository is independent and established.
 
 ## Not Doing (and Why)
 - Always-on background sync in the first release — prove the explicit flow first
+- OpenChamber-managed Account/SSH identities in v1 — the public SDK exposes no
+  identity selection/credential API; avoid copying those credentials into the extension
 - Vector clocks / CRDTs — wall clock + tombstones cover the real failures
 - Encrypted secrets — keys verified out of scope already
 - Per-project UI state — machine-local by nature

@@ -48,3 +48,95 @@ test('requires the service bearer token and previews only safe summary data', as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('tests a repository URL through the read-only Git probe', async () => {
+  let probedUrl;
+  const server = createServiceServer({
+    token: 'test-service-token',
+    openChamberDir: '/unused',
+    openCodeDir: '/unused',
+    gitProbe: async (url) => {
+      probedUrl = url;
+      return { repository: 'acme/config', url };
+    },
+  });
+
+  try {
+    const origin = await startServer(server);
+    const response = await fetch(`${origin}/repository/test`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-service-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ url: 'https://github.com/acme/config.git' }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      accessible: true,
+      repository: 'acme/config',
+      url: 'https://github.com/acme/config.git',
+    });
+    assert.equal(probedUrl, 'https://github.com/acme/config.git');
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('rejects credential-bearing repository URLs without echoing them', async () => {
+  const server = createServiceServer({
+    token: 'test-service-token',
+    openChamberDir: '/unused',
+    openCodeDir: '/unused',
+  });
+
+  try {
+    const origin = await startServer(server);
+    const response = await fetch(`${origin}/repository/test`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-service-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ url: 'https://alice:secret@github.com/acme/config.git' }),
+    });
+
+    assert.equal(response.status, 400);
+    const body = await response.text();
+    assert.equal(body, '{"error":"invalid-repository-url"}');
+    assert.doesNotMatch(body, /alice|secret/);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('does not return Git stderr from a failed private-repo check', async () => {
+  const server = createServiceServer({
+    token: 'test-service-token',
+    openChamberDir: '/unused',
+    openCodeDir: '/unused',
+    gitProbe: async () => {
+      throw Object.assign(new Error('credential helper private output'), { code: 'GIT_ACCESS_FAILED' });
+    },
+  });
+
+  try {
+    const origin = await startServer(server);
+    const response = await fetch(`${origin}/repository/test`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-service-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ url: 'https://github.com/acme/config.git' }),
+    });
+
+    assert.equal(response.status, 422);
+    const body = await response.text();
+    assert.equal(body, '{"error":"git-access-failed"}');
+    assert.doesNotMatch(body, /credential helper|private output/);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

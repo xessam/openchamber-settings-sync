@@ -1856,6 +1856,13 @@ ${GUEST_UI_LOOK_CSS}`;
       node.textContent = next;
     }
   };
+  var setAttr = (node, name, value) => {
+    if (value === void 0 || value === null || value === "") {
+      node.removeAttribute(name);
+    } else if (node.getAttribute(name) !== value) {
+      node.setAttribute(name, value);
+    }
+  };
 
   // node_modules/@openchamber/sdk/dist/ui/button.js
   var ring = () => {
@@ -1905,13 +1912,67 @@ ${GUEST_UI_LOOK_CSS}`;
     };
   };
 
+  // node_modules/@openchamber/sdk/dist/ui/field.js
+  var mountTextField = (root2, initial) => {
+    ensureStyle(UI_CSS);
+    let props = initial;
+    const field2 = el("label", "oc-sdk oc-sdk-field");
+    const caption = el("span", "oc-sdk-field-label");
+    const input = props.multiline ? el("textarea", "oc-sdk-input") : el("input", "oc-sdk-input");
+    const note = el("span", "oc-sdk-field-note");
+    field2.append(caption, input, note);
+    root2.append(field2);
+    const paint = () => {
+      setText(caption, props.label);
+      caption.hidden = !props.label;
+      if (input instanceof HTMLInputElement) {
+        input.type = props.password ? "password" : "text";
+      } else {
+        input.rows = props.rows ?? 3;
+      }
+      if (input.value !== props.value) {
+        input.value = props.value;
+      }
+      input.disabled = Boolean(props.disabled);
+      setAttr(input, "placeholder", props.placeholder);
+      input.dataset.mono = props.mono ? "true" : "false";
+      const invalid = Boolean(props.error);
+      field2.dataset.invalid = invalid ? "true" : "false";
+      input.setAttribute("aria-invalid", invalid ? "true" : "false");
+      const text = props.error ?? props.helper ?? "";
+      setText(note, text);
+      note.hidden = text === "";
+    };
+    const onInput = () => {
+      props.onChange(input.value);
+    };
+    input.addEventListener("input", onInput);
+    paint();
+    return {
+      update: (next) => {
+        props = { ...props, ...next };
+        paint();
+      },
+      dispose: () => {
+        input.removeEventListener("input", onInput);
+        field2.remove();
+      }
+    };
+  };
+
   // src/panel.js
   var host = connectHost();
   var root = document.querySelector("#root");
-  var actionRoot = document.querySelector("#action");
-  var status = document.querySelector("#status");
+  var repoFieldRoot = document.querySelector("#repo-field");
+  var repoActionRoot = document.querySelector("#repo-action");
+  var repoStatus = document.querySelector("#repo-status");
+  var previewActionRoot = document.querySelector("#preview-action");
+  var previewStatus = document.querySelector("#preview-status");
   var sourcesRoot = document.querySelector("#sources");
   var mounted = false;
+  var repoUrl = "";
+  var repoField;
+  var repoTestButton;
   var previewButton;
   var sourceLabels = {
     preferences: "OpenChamber preferences",
@@ -1933,9 +1994,50 @@ ${GUEST_UI_LOOK_CSS}`;
       sourcesRoot.append(row);
     }
   }
+  function repoErrorMessage(error) {
+    if (error === "invalid-repository-url") return "Enter a private GitHub URL such as https://github.com/owner/repo.git.";
+    if (error === "git-not-installed") return "Git is not available to the OpenChamber service on this machine.";
+    if (error === "git-timeout") return "Git did not respond in time. Check your network and try again.";
+    return "Git could not access this repository. Check the URL and authenticate with this machine\u2019s Git credential helper, then retry.";
+  }
+  async function testRepository() {
+    const url = repoUrl.trim();
+    if (!url) {
+      repoStatus.textContent = "Enter a GitHub repository URL first.";
+      return;
+    }
+    repoTestButton.update({ loading: true });
+    repoStatus.textContent = "Testing read access with Git\u2026";
+    let payload;
+    try {
+      const response = await host.serviceRequest({
+        method: "POST",
+        path: "/repository/test",
+        body: { url }
+      });
+      payload = JSON.parse(response.body);
+      if (response.status !== 200 || payload.accessible !== true || typeof payload.url !== "string") {
+        repoStatus.textContent = repoErrorMessage(payload.error);
+        return;
+      }
+    } catch {
+      repoStatus.textContent = "Could not test Git access. Check that the extension service is enabled and try again.";
+      return;
+    } finally {
+      repoTestButton.update({ loading: false });
+    }
+    repoUrl = payload.url;
+    repoField.update({ value: repoUrl });
+    try {
+      await host.storage.set("repositoryUrl", repoUrl);
+      repoStatus.textContent = `Git can read ${payload.repository}. No files were changed.`;
+    } catch {
+      repoStatus.textContent = "Git can read the repository, but its URL could not be saved in extension storage.";
+    }
+  }
   async function preview() {
     previewButton.update({ loading: true });
-    status.textContent = "Reading local configuration\u2026";
+    previewStatus.textContent = "Reading local configuration\u2026";
     sourcesRoot.replaceChildren();
     try {
       const result = await host.serviceRequest({ method: "GET", path: "/preview" });
@@ -1943,24 +2045,45 @@ ${GUEST_UI_LOOK_CSS}`;
       const payload = JSON.parse(result.body);
       if (!Array.isArray(payload.sources)) throw new Error("invalid-preview");
       renderSources(payload.sources);
-      status.textContent = "Preview ready. Nothing has been synced or changed.";
+      previewStatus.textContent = "Preview ready. Nothing has been synced or changed.";
     } catch {
-      status.textContent = "Could not read the local configuration. Check that the service is enabled and try again.";
+      previewStatus.textContent = "Could not read the local configuration. Check that the service is enabled and try again.";
     } finally {
       previewButton.update({ loading: false });
     }
   }
-  function mount() {
+  async function mount() {
     if (mounted) return;
     mounted = true;
-    previewButton = mountButton(actionRoot, {
-      label: "Preview sync scope",
+    try {
+      const savedUrl = await host.storage.get("repositoryUrl");
+      if (typeof savedUrl === "string") repoUrl = savedUrl;
+    } catch {
+    }
+    repoField = mountTextField(repoFieldRoot, {
+      label: "Private GitHub repository URL",
+      value: repoUrl,
+      placeholder: "https://github.com/owner/repo.git",
+      helper: "Credentials are read from this machine\u2019s Git configuration; the URL must not contain credentials.",
+      mono: true,
+      onChange: (value) => {
+        repoUrl = value;
+        repoField.update({ value });
+      }
+    });
+    repoTestButton = mountButton(repoActionRoot, {
+      label: "Test Git access",
       variant: "default",
+      onClick: () => void testRepository()
+    });
+    previewButton = mountButton(previewActionRoot, {
+      label: "Preview sync scope",
+      variant: "secondary",
       onClick: () => void preview()
     });
   }
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
-    if (root) mount();
+    if (root) void mount();
   });
 })();

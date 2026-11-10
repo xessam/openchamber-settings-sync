@@ -176,7 +176,70 @@ async function createLocalPreview({ openChamberDir: openChamberDir2, openCodeDir
   return { sources: [preferences, opencode, extensions] };
 }
 
+// src/repository.js
+import { execFile as nodeExecFile } from "node:child_process";
+function repositoryError(code) {
+  const message = code === "INVALID_REPOSITORY_URL" ? "Invalid GitHub repository URL" : "Git repository access failed";
+  return Object.assign(new Error(message), { code });
+}
+function normalizeGitHubRepoUrl(value) {
+  if (typeof value !== "string" || value.length > 2048) {
+    throw repositoryError("INVALID_REPOSITORY_URL");
+  }
+  const input = value.trim();
+  const authority = input.match(/^https:\/\/([^/?#]*)/i)?.[1];
+  if (!authority || authority.includes("@")) throw repositoryError("INVALID_REPOSITORY_URL");
+  let url;
+  try {
+    url = new URL(input);
+  } catch {
+    throw repositoryError("INVALID_REPOSITORY_URL");
+  }
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port || url.username || url.password || url.search || url.hash) {
+    throw repositoryError("INVALID_REPOSITORY_URL");
+  }
+  const match = url.pathname.match(/^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/);
+  if (!match || match[1] === "." || match[1] === ".." || match[2] === "." || match[2] === "..") {
+    throw repositoryError("INVALID_REPOSITORY_URL");
+  }
+  const owner = match[1];
+  const name = match[2];
+  if (!name || name.endsWith(".git")) throw repositoryError("INVALID_REPOSITORY_URL");
+  return {
+    url: `https://github.com/${owner}/${name}.git`,
+    repository: `${owner}/${name}`
+  };
+}
+function probeGitHubRepo(value, { execFile = nodeExecFile } = {}) {
+  let remote;
+  try {
+    remote = normalizeGitHubRepoUrl(value);
+  } catch {
+    return Promise.reject(repositoryError("INVALID_REPOSITORY_URL"));
+  }
+  return new Promise((resolve, reject) => {
+    execFile("git", ["ls-remote", "--heads", remote.url], {
+      shell: false,
+      timeout: 15e3,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "never"
+      }
+    }, (error) => {
+      if (!error) {
+        resolve(remote);
+        return;
+      }
+      const code = error.code === "ENOENT" ? "GIT_NOT_INSTALLED" : error.killed || error.code === "ETIMEDOUT" ? "GIT_TIMEOUT" : "GIT_ACCESS_FAILED";
+      reject(repositoryError(code));
+    });
+  });
+}
+
 // src/service.js
+var MAX_REQUEST_BYTES = 4096;
 function sendJson(response, status, body) {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -184,7 +247,20 @@ function sendJson(response, status, body) {
   });
   response.end(JSON.stringify(body));
 }
-function createServiceServer({ token: token2, openChamberDir: openChamberDir2, openCodeDir: openCodeDir2 }) {
+async function readJsonBody(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > MAX_REQUEST_BYTES) throw Object.assign(new Error(), { code: "BODY_TOO_LARGE" });
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+function isRequestObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+function createServiceServer({ token: token2, openChamberDir: openChamberDir2, openCodeDir: openCodeDir2, gitProbe = probeGitHubRepo }) {
   if (typeof token2 !== "string" || token2.length === 0) {
     throw new TypeError("A service token is required");
   }
@@ -209,6 +285,29 @@ function createServiceServer({ token: token2, openChamberDir: openChamberDir2, o
         sendJson(response, 200, await createLocalPreview({ openChamberDir: openChamberDir2, openCodeDir: openCodeDir2 }));
       } catch {
         sendJson(response, 503, { error: "preview-unavailable" });
+      }
+      return;
+    }
+    if (request.method === "POST" && pathname === "/repository/test") {
+      let body;
+      try {
+        body = await readJsonBody(request);
+      } catch (error) {
+        sendJson(response, error?.code === "BODY_TOO_LARGE" ? 413 : 400, { error: "invalid-request" });
+        return;
+      }
+      if (!isRequestObject(body) || Object.keys(body).some((key) => key !== "url") || typeof body.url !== "string") {
+        sendJson(response, 400, { error: "invalid-request" });
+        return;
+      }
+      try {
+        const result = await gitProbe(body.url);
+        sendJson(response, 200, { accessible: true, repository: result.repository, url: result.url });
+      } catch (error) {
+        const code = error?.code;
+        const status = code === "INVALID_REPOSITORY_URL" ? 400 : code === "GIT_NOT_INSTALLED" ? 503 : code === "GIT_TIMEOUT" ? 504 : 422;
+        const publicCode = code === "INVALID_REPOSITORY_URL" ? "invalid-repository-url" : code === "GIT_NOT_INSTALLED" ? "git-not-installed" : code === "GIT_TIMEOUT" ? "git-timeout" : "git-access-failed";
+        sendJson(response, status, { error: publicCode });
       }
       return;
     }
