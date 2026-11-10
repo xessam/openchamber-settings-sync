@@ -34,7 +34,7 @@
         "entry": "service/main.js",
         "runtime": "host",
         "permissions": {
-          "exec": ["git"]
+          "exec": ["git", "ssh"]
         }
       }
     }

@@ -40,17 +40,19 @@ Mechanics (v1):
 - Secrets: never sync OpenCode data/auth databases or legacy `auth.json`;
   `auth.json` exists on older installs, while current OpenCode can store
   credentials in its SQLite database. Strip config credentials defensively.
-- Git auth in v1: use the machine's configured Git credential helper; never
-  accept credentials in the remote URL or store a token in extension data.
-  OpenChamber-managed Account/SSH identities are not exposed by the public
-  extension SDK; using them needs a host-side Git API.
+- Git auth in v1: accept GitHub HTTPS via the machine's credential helper and
+  GitHub SSH via the machine's non-interactive OpenSSH config/key files. Never
+  accept credentials in the remote or store keys/tokens in extension data.
+  OpenChamber-managed identities and SSH-agent-only/passphrase-prompted keys
+  are not exposed to the service; supporting them needs a host-side Git API.
 - Apply: writes files; OpenChamber picks up on reload (verify — Open Q2)
 
 Implementation status: extension manifest, authenticated loopback service,
 local preview panel, source filters, and per-machine LWW/tombstone primitives
-are implemented and tested. The panel accepts a credential-free GitHub HTTPS
-URL and tests read access with non-interactive `git ls-remote`; this is
-read-only. Push/pull and applying merged values remain unimplemented.
+are implemented and tested. The panel accepts credential-free GitHub HTTPS
+or scp-style SSH remotes and tests read access with non-interactive
+`git ls-remote`; this is read-only. Push/pull and applying merged values
+remain unimplemented.
 
 ## Key Assumptions to Validate
 - [ ] Extension `service` can push/pull a private repo — local service protocol

@@ -77,10 +77,10 @@ export function createServiceServer({ token, openChamberDir, openCodeDir, gitPro
         sendJson(response, 200, { accessible: true, repository: result.repository, url: result.url });
       } catch (error) {
         const code = error?.code;
-        const status = code === 'INVALID_REPOSITORY_URL' ? 400
+        const status = code === 'INVALID_REPOSITORY_REMOTE' ? 400
           : code === 'GIT_NOT_INSTALLED' ? 503
             : code === 'GIT_TIMEOUT' ? 504 : 422;
-        const publicCode = code === 'INVALID_REPOSITORY_URL' ? 'invalid-repository-url'
+        const publicCode = code === 'INVALID_REPOSITORY_REMOTE' ? 'invalid-repository-url'
           : code === 'GIT_NOT_INSTALLED' ? 'git-not-installed'
             : code === 'GIT_TIMEOUT' ? 'git-timeout' : 'git-access-failed';
         sendJson(response, status, { error: publicCode });

@@ -40,10 +40,11 @@ function renderSources(sources) {
   }
 }
 
-function repoErrorMessage(error) {
-  if (error === 'invalid-repository-url') return 'Enter a private GitHub URL such as https://github.com/owner/repo.git.';
+function repoErrorMessage(error, remote) {
+  if (error === 'invalid-repository-url') return 'Enter a GitHub HTTPS URL or SSH address such as git@github.com:owner/repo.git.';
   if (error === 'git-not-installed') return 'Git is not available to the OpenChamber service on this machine.';
   if (error === 'git-timeout') return 'Git did not respond in time. Check your network and try again.';
+  if (remote.startsWith('git@github.com:')) return 'SSH access failed. Check that your key is accepted by GitHub and github.com is trusted in ~/.ssh/known_hosts. SSH agent-only or passphrase-prompted keys are not available to the service.';
   return 'Git could not access this repository. Check the URL and authenticate with this machine’s Git credential helper, then retry.';
 }
 
@@ -65,7 +66,7 @@ async function testRepository() {
     });
     payload = JSON.parse(response.body);
     if (response.status !== 200 || payload.accessible !== true || typeof payload.url !== 'string') {
-      repoStatus.textContent = repoErrorMessage(payload.error);
+      repoStatus.textContent = repoErrorMessage(payload.error, url);
       return;
     }
   } catch (error) {
@@ -113,10 +114,10 @@ async function mount() {
     // The input remains usable when extension storage is unavailable.
   }
   repoField = mountTextField(repoFieldRoot, {
-    label: 'Private GitHub repository URL',
+    label: 'GitHub repository address',
     value: repoUrl,
-    placeholder: 'https://github.com/owner/repo.git',
-    helper: 'Credentials are read from this machine’s Git configuration; the URL must not contain credentials.',
+    placeholder: 'git@github.com:owner/repo.git',
+    helper: 'Use HTTPS with a Git credential helper or SSH with a non-interactive key. Never put credentials in the address.',
     mono: true,
     onChange: (value) => {
       repoUrl = value;
