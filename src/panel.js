@@ -1,5 +1,6 @@
 import { connectHost } from '@openchamber/sdk';
 import { applyHostReady, mountButton, mountTextField } from '@openchamber/sdk/ui';
+import { repositoryServiceErrorMessage } from './service-errors.js';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -67,8 +68,8 @@ async function testRepository() {
       repoStatus.textContent = repoErrorMessage(payload.error);
       return;
     }
-  } catch {
-    repoStatus.textContent = 'Could not test Git access. Check that the extension service is enabled and try again.';
+  } catch (error) {
+    repoStatus.textContent = repositoryServiceErrorMessage(error);
     return;
   } finally {
     repoTestButton.update({ loading: false });
