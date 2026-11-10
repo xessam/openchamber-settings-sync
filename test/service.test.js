@@ -32,6 +32,12 @@ test('requires the service bearer token and previews only safe summary data', as
     const unauthorized = await fetch(`${origin}/health`);
     assert.equal(unauthorized.status, 401);
 
+    const health = await fetch(`${origin}/health`, {
+      headers: { authorization: 'Bearer test-service-token' },
+    });
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { ok: true });
+
     const previewResponse = await fetch(`${origin}/preview`, {
       headers: { authorization: 'Bearer test-service-token' },
     });

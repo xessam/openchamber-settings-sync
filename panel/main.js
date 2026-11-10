@@ -1965,6 +1965,7 @@ ${GUEST_UI_LOOK_CSS}`;
     NO_SERVICE: "The local service is not approved or available. Check Settings \u2192 Extensions and reopen the panel.",
     DISABLED: "OpenChamber Sync is paused. Resume it in Settings \u2192 Extensions and retry.",
     SERVICE_FAILED: "The local service failed to start. Reopen the panel; if this continues, reinstall the current extension build.",
+    SERVICE_NOT_READY: "The local service did not become ready. Reopen the panel and retry.",
     REQUEST_FAILED: "The local service did not return a response. Reopen the extension and retry.",
     HOST_TIMEOUT: "OpenChamber did not answer the service request in time. Retry the Git access test.",
     HOST_UNAVAILABLE: "The panel is not connected to OpenChamber. Reopen it from the Extensions list."
@@ -1972,6 +1973,17 @@ ${GUEST_UI_LOOK_CSS}`;
   function repositoryServiceErrorMessage(error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : void 0;
     return typeof code === "string" && MESSAGES[code] ? MESSAGES[code] : "The local service request failed. Retry the Git access test from the extension panel.";
+  }
+
+  // src/repository-service.js
+  async function runRepositoryProbe(serviceRequest, url, onReady = () => {
+  }) {
+    const health = await serviceRequest({ method: "GET", path: "/health" });
+    if (health.status !== 200) {
+      throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
+    }
+    onReady();
+    return serviceRequest({ method: "POST", path: "/repository/test", body: { url } });
   }
 
   // src/panel.js
@@ -2022,14 +2034,16 @@ ${GUEST_UI_LOOK_CSS}`;
       return;
     }
     repoTestButton.update({ loading: true });
-    repoStatus.textContent = "Testing read access with Git\u2026";
+    repoStatus.textContent = "Starting local Git service\u2026";
     let payload;
     try {
-      const response = await host.serviceRequest({
-        method: "POST",
-        path: "/repository/test",
-        body: { url }
-      });
+      const response = await runRepositoryProbe(
+        (request) => host.serviceRequest(request),
+        url,
+        () => {
+          repoStatus.textContent = "Testing read access with Git\u2026";
+        }
+      );
       payload = JSON.parse(response.body);
       if (response.status !== 200 || payload.accessible !== true || typeof payload.url !== "string") {
         repoStatus.textContent = repoErrorMessage(payload.error, url);

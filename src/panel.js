@@ -1,6 +1,7 @@
 import { connectHost } from '@openchamber/sdk';
 import { applyHostReady, mountButton, mountTextField } from '@openchamber/sdk/ui';
 import { repositoryServiceErrorMessage } from './service-errors.js';
+import { runRepositoryProbe } from './repository-service.js';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -56,14 +57,14 @@ async function testRepository() {
   }
 
   repoTestButton.update({ loading: true });
-  repoStatus.textContent = 'Testing read access with Git…';
+  repoStatus.textContent = 'Starting local Git service…';
   let payload;
   try {
-    const response = await host.serviceRequest({
-      method: 'POST',
-      path: '/repository/test',
-      body: { url },
-    });
+    const response = await runRepositoryProbe(
+      (request) => host.serviceRequest(request),
+      url,
+      () => { repoStatus.textContent = 'Testing read access with Git…'; },
+    );
     payload = JSON.parse(response.body);
     if (response.status !== 200 || payload.accessible !== true || typeof payload.url !== 'string') {
       repoStatus.textContent = repoErrorMessage(payload.error, url);
