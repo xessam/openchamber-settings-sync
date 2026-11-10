@@ -38,7 +38,7 @@ test('probes with non-interactive git and never places credentials in arguments'
   assert.equal(invocation.options.shell, false);
   assert.equal(invocation.options.env.GIT_TERMINAL_PROMPT, '0');
   assert.equal(invocation.options.env.GCM_INTERACTIVE, 'never');
-  assert.equal(invocation.options.timeout, 15_000);
+  assert.equal(invocation.options.timeout, 7_000);
 });
 
 test('returns a generic access error instead of exposing git stderr', async () => {

@@ -51,7 +51,7 @@ export function probeGitHubRepo(value, { execFile = nodeExecFile } = {}) {
   return new Promise((resolve, reject) => {
     execFile('git', ['ls-remote', '--heads', remote.url], {
       shell: false,
-      timeout: 15_000,
+      timeout: 7_000,
       maxBuffer: 1024 * 1024,
       env: {
         ...process.env,
