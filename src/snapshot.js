@@ -1,3 +1,5 @@
+import { containsCredentialMarker } from './credential-scan.js';
+
 const PORTABLE_PREFERENCE_FIELDS = new Set([
   'lightThemeId',
   'darkThemeId',
@@ -46,26 +48,29 @@ function isRecord(value) {
 }
 
 function sanitizeString(value) {
-  if (!/^https?:\/\//i.test(value)) return value;
-
-  try {
-    const url = new URL(value);
-    let changed = false;
-    if (url.username || url.password) {
-      url.username = '';
-      url.password = '';
-      changed = true;
-    }
-    for (const key of [...url.searchParams.keys()]) {
-      if (SENSITIVE_QUERY_KEY.test(key)) {
-        url.searchParams.delete(key);
+  let sanitized = value;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      let changed = false;
+      if (url.username || url.password) {
+        url.username = '';
+        url.password = '';
         changed = true;
       }
+      for (const key of [...url.searchParams.keys()]) {
+        if (SENSITIVE_QUERY_KEY.test(key)) {
+          url.searchParams.delete(key);
+          changed = true;
+        }
+      }
+      sanitized = changed ? url.toString() : value;
+    } catch {
+      sanitized = value;
     }
-    return changed ? url.toString() : value;
-  } catch {
-    return value;
   }
+  if (containsCredentialMarker(sanitized)) throw new TypeError('Config contains credential-like text');
+  return sanitized;
 }
 
 function sanitizeValue(value, seen = new WeakSet()) {
@@ -110,6 +115,16 @@ export function selectPortablePreferences(preferences) {
     }
   }
   return { version: preferences.version, fields };
+}
+
+export function isPortablePreferenceField(key) {
+  return PORTABLE_PREFERENCE_FIELDS.has(key);
+}
+
+export function isPortableOpenCodeConfigKey(key) {
+  return typeof key === 'string'
+    && !NEVER_SYNC_KEYS.has(key.toLowerCase())
+    && !SENSITIVE_KEY.test(key);
 }
 
 export function sanitizeOpenCodeConfig(config) {

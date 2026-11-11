@@ -55,6 +55,19 @@ export function normalizeGitHubRemote(value) {
   };
 }
 
+function diagnosticReason(code, stderr, transport) {
+  if (code === 'GIT_NOT_INSTALLED') return 'git-unavailable';
+  if (code === 'GIT_TIMEOUT') return 'timeout';
+  const output = typeof stderr === 'string' ? stderr : '';
+  if (transport === 'ssh' && /host key verification failed|remote host identification has changed/i.test(output)) return 'ssh-host-key';
+  if (transport === 'ssh' && /permission denied \(publickey/i.test(output)) return 'ssh-authentication';
+  if (/could not resolve hostname|could not resolve host|name or service not known/i.test(output)) return 'dns';
+  if (/connection refused|connection timed out|network is unreachable|no route to host/i.test(output)) return 'connection';
+  if (/repository not found/i.test(output)) return 'repository-not-found';
+  if (transport === 'ssh' && /cannot run ssh:|ssh: (?:not found|no such file or directory)/i.test(output)) return 'ssh-unavailable';
+  return 'unknown';
+}
+
 export function probeGitHubRepo(value, { execFile = nodeExecFile } = {}) {
   let remote;
   try {
@@ -77,7 +90,7 @@ export function probeGitHubRepo(value, { execFile = nodeExecFile } = {}) {
       timeout: 7_000,
       maxBuffer: 1024 * 1024,
       env,
-    }, (error) => {
+    }, (error, _stdout, stderr) => {
       if (!error) {
         resolve(remote);
         return;
@@ -88,7 +101,14 @@ export function probeGitHubRepo(value, { execFile = nodeExecFile } = {}) {
         : error.killed || error.code === 'ETIMEDOUT'
           ? 'GIT_TIMEOUT'
           : 'GIT_ACCESS_FAILED';
-      reject(repositoryError(code));
+      const failure = repositoryError(code);
+      failure.diagnostics = {
+        transport: remote.transport,
+        reason: diagnosticReason(code, stderr, remote.transport),
+        ...(remote.transport === 'ssh' ? { sshAgent: env.SSH_AUTH_SOCK ? 'configured' : 'not-configured' } : {}),
+        ...(Number.isInteger(error.code) && error.code >= 0 && error.code <= 255 ? { exitCode: error.code } : {}),
+      };
+      reject(failure);
     });
   });
 }

@@ -9,8 +9,12 @@ function isRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
+export function isValidMachineId(machineId) {
+  return typeof machineId === 'string' && MACHINE_ID.test(machineId);
+}
+
 function assertMachineId(machineId) {
-  if (typeof machineId !== 'string' || !MACHINE_ID.test(machineId)) {
+  if (!isValidMachineId(machineId)) {
     throw new TypeError('Invalid machine id');
   }
 }
@@ -44,7 +48,7 @@ function canonicalize(value, seen = new WeakSet()) {
   return result;
 }
 
-function stableJson(value) {
+export function stableJson(value) {
   return JSON.stringify(canonicalize(value));
 }
 

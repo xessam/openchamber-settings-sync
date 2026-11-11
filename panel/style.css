@@ -38,8 +38,29 @@ h2 {
 }
 
 #repo-action,
-#preview-action {
+#preview-action,
+#first-sync-action {
   margin: 0.75rem 0 0.5rem;
+}
+
+.diagnostics {
+  font-size: 0.875rem;
+}
+
+.diagnostics summary {
+  cursor: pointer;
+}
+
+#repo-log {
+  box-sizing: border-box;
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+  font: 0.8rem/1.5 monospace;
 }
 
 #sources {
@@ -74,4 +95,140 @@ h2 {
 .notice {
   padding-top: 0.75rem;
   border-top: 1px solid var(--oc-border, currentColor);
+}
+
+.sync-summary,
+.sync-warning,
+.sync-empty {
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.sync-warning {
+  padding: 0.65rem 0.75rem;
+  border-inline-start: 3px solid var(--oc-warning, currentColor);
+}
+
+.sync-change-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sync-change {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+}
+
+.sync-change-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
+.sync-change h3 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.sync-action {
+  flex: none;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--oc-radius, 0.5rem);
+  background: var(--oc-surface, transparent);
+  font-size: 0.75rem;
+}
+
+.sync-values {
+  margin-top: 0.75rem;
+  font-size: 0.825rem;
+}
+
+.sync-values summary {
+  cursor: pointer;
+}
+
+.sync-value h4 {
+  margin: 0.65rem 0 0.35rem;
+  font-size: 0.8rem;
+}
+
+.sync-value pre {
+  box-sizing: border-box;
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 0.78rem/1.45 monospace;
+}
+
+.sync-conflict-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin: 0.75rem 0 0;
+  padding: 0.65rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+  font-size: 0.825rem;
+}
+
+.sync-conflict-choices legend {
+  padding-inline: 0.25rem;
+  font-weight: 600;
+}
+
+.sync-conflict-choices label,
+.confirmation-label {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  line-height: 1.4;
+}
+
+#first-sync-confirmation {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--oc-border, currentColor);
+}
+
+#first-sync-confirm-button,
+#first-sync-push-button {
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--oc-border, currentColor);
+  border-radius: var(--oc-radius, 0.5rem);
+  color: inherit;
+  background: var(--oc-surface, transparent);
+  font: inherit;
+  cursor: pointer;
+}
+
+#first-sync-confirm-button + #first-sync-push-button {
+  margin-left: 0.5rem;
+}
+
+#first-sync-confirm-button:disabled,
+#first-sync-push-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+#first-sync-confirm-status {
+  color: var(--oc-muted, currentColor);
+  font-size: 0.875rem;
+  line-height: 1.45;
 }

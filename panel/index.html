@@ -16,6 +16,11 @@
         <div id="repo-field"></div>
         <div id="repo-action"></div>
         <p id="repo-status" role="status" aria-live="polite">No repository tested.</p>
+        <details class="diagnostics" open>
+          <summary>Git test diagnostics</summary>
+          <p class="helper">Safe diagnostic summary; raw Git and SSH output is not shown because it may contain private data.</p>
+          <pre id="repo-log" aria-label="Git test diagnostics">Run a test to see diagnostic information.</pre>
+        </details>
       </section>
       <section aria-labelledby="preview-title">
         <h2 id="preview-title">Portable settings</h2>
@@ -23,7 +28,25 @@
         <p id="preview-status" role="status" aria-live="polite">Nothing has been read yet.</p>
         <ul id="sources" aria-label="Sync sources"></ul>
       </section>
-      <p class="notice">This preview only reads local config. It does not upload or change anything.</p>
+      <section aria-labelledby="first-sync-title">
+        <h2 id="first-sync-title">First-sync review</h2>
+        <p class="helper">Compare this machine with the repository. Inspect every proposed change and choose a side for each conflict.</p>
+        <p id="machine-identity-status" class="helper" role="status" aria-live="polite">Checking stable device identity…</p>
+        <div id="first-sync-action"></div>
+        <p id="first-sync-status" role="status" aria-live="polite">No repository comparison has been run.</p>
+        <div id="first-sync-preview"></div>
+        <div id="first-sync-confirmation" hidden>
+          <label class="confirmation-label">
+            <input id="first-sync-reviewed" type="checkbox" />
+            I reviewed the listed changes and approve this plan.
+          </label>
+          <button id="first-sync-confirm-button" type="button" disabled>Confirm this plan</button>
+          <button id="first-sync-push-button" type="button" hidden>Push initial state</button>
+          <button id="first-sync-apply-button" type="button" hidden>Apply to this machine</button>
+          <p id="first-sync-confirm-status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+      <p class="notice">Comparison and confirmation are read-only and never upload data. Pushing the initial state and applying approved changes are separate explicit steps: the push writes only machines/&lt;machine-id&gt;/state.json to the repository, and the apply writes only the approved values to this machine's local files, with backups and an interruption-safe recovery marker.</p>
     </main>
     <script src="main.js"></script>
   </body>

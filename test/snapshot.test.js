@@ -98,6 +98,18 @@ test('removes credentials embedded in endpoint URLs', () => {
   assert.equal(safe.provider.options.baseURL, 'https://example.invalid/v1?region=eu');
 });
 
+test('rejects credential-like text embedded in arbitrary config strings', () => {
+  assert.throws(() => sanitizeOpenCodeConfig({
+    mcp: { local: { command: 'curl https://user:password@example.invalid/mcp' } },
+  }), /credential-like text/i);
+  assert.throws(() => sanitizeOpenCodeConfig({
+    plugin: { description: 'Use authorization: Bearer literal-token-value' },
+  }), /credential-like text/i);
+  assert.throws(() => sanitizeOpenCodeConfig({
+    provider: { options: { endpoint: 'sk-proj-123456789012345678901234567890' } },
+  }), /credential-like text/i);
+});
+
 test('omits prototype-manipulation keys while sanitizing', () => {
   const source = JSON.parse('{"safe":1,"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}');
 

@@ -11,7 +11,7 @@ test('reports portable item counts without returning local config values', async
   const openChamberDir = path.join(root, 'openchamber');
   const openCodeDir = path.join(root, 'opencode');
   await mkdir(openChamberDir);
-  await mkdir(openCodeDir);
+  await mkdir(path.join(openCodeDir, 'agents'), { recursive: true });
   await writeFile(path.join(openChamberDir, 'preferences.json'), JSON.stringify({
     version: 1,
     fields: {
@@ -28,6 +28,7 @@ test('reports portable item counts without returning local config values', async
     model: 'provider/model',
     provider: { apiKey: 'must-not-leak', options: { timeout: 1000 } },
   }));
+  await writeFile(path.join(openCodeDir, 'agents', 'review.md'), 'portable agent text');
 
   try {
     const preview = await createLocalPreview({ openChamberDir, openCodeDir });
@@ -35,9 +36,10 @@ test('reports portable item counts without returning local config values', async
     assert.deepEqual(preview.sources, [
       { id: 'preferences', status: 'ready', portableItems: 2 },
       { id: 'opencode', status: 'ready', portableItems: 2 },
+      { id: 'opencode-files', status: 'ready', portableItems: 1 },
       { id: 'extensions', status: 'ready', portableItems: 1 },
     ]);
-    assert.doesNotMatch(JSON.stringify(preview), /private-theme-name|local\/project|must-not-leak/);
+    assert.doesNotMatch(JSON.stringify(preview), /private-theme-name|local\/project|must-not-leak|portable agent text/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -58,6 +60,7 @@ test('fails closed on symlinked or malformed config files', async () => {
     assert.deepEqual(preview.sources, [
       { id: 'preferences', status: 'unavailable', portableItems: 0 },
       { id: 'opencode', status: 'unavailable', portableItems: 0 },
+      { id: 'opencode-files', status: 'ready', portableItems: 0 },
       { id: 'extensions', status: 'missing', portableItems: 0 },
     ]);
   } finally {

@@ -1960,6 +1960,51 @@ ${GUEST_UI_LOOK_CSS}`;
     };
   };
 
+  // src/first-sync-confirmation.js
+  function canConfirmFirstSync(preview2, choices, acknowledged) {
+    if (acknowledged !== true || preview2?.canConfirm !== true || !Array.isArray(preview2.items) || choices === null || typeof choices !== "object") return false;
+    return preview2.items.every((item) => item.action !== "conflict" || Object.hasOwn(choices, item.key) && ["local", "remote"].includes(choices[item.key]));
+  }
+
+  // src/state.js
+  var MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  function isValidMachineId(machineId2) {
+    return typeof machineId2 === "string" && MACHINE_ID.test(machineId2);
+  }
+
+  // src/machine-identity.js
+  var STORAGE_KEY = "machineId";
+  var LOCK_NAME = "openchamber-sync-machine-id";
+  function identityError(code, message) {
+    return Object.assign(new Error(message), { code });
+  }
+  async function getOrCreateMachineId({ storage, deviceStorageAvailable, lockManager, randomUUID } = {}) {
+    if (deviceStorageAvailable !== true) {
+      throw identityError("DEVICE_STORAGE_UNAVAILABLE", "Device-scoped extension storage is unavailable");
+    }
+    if (!storage || typeof storage.get !== "function" || typeof storage.set !== "function") {
+      throw identityError("MACHINE_ID_STORAGE_UNAVAILABLE", "Device identity storage is unavailable");
+    }
+    if (!lockManager || typeof lockManager.request !== "function") {
+      throw identityError("DEVICE_IDENTITY_LOCK_UNAVAILABLE", "Could not safely initialize the device identity");
+    }
+    return lockManager.request(LOCK_NAME, { mode: "exclusive" }, async () => {
+      const stored = await storage.get(STORAGE_KEY, { scope: "device" });
+      if (isValidMachineId(stored)) return stored;
+      const generate = randomUUID ?? (() => globalThis.crypto?.randomUUID?.());
+      const machineId2 = generate();
+      if (!isValidMachineId(machineId2)) {
+        throw identityError("MACHINE_ID_INVALID", "Could not create a valid device identity");
+      }
+      await storage.set(STORAGE_KEY, machineId2, { scope: "device" });
+      const persisted = await storage.get(STORAGE_KEY, { scope: "device" });
+      if (!isValidMachineId(persisted)) {
+        throw identityError("MACHINE_ID_STORAGE_FAILED", "Could not persist the device identity");
+      }
+      return persisted;
+    });
+  }
+
   // src/service-errors.js
   var MESSAGES = {
     NO_SERVICE: "The local service is not approved or available. Check Settings \u2192 Extensions and reopen the panel.",
@@ -1983,7 +2028,101 @@ ${GUEST_UI_LOOK_CSS}`;
       throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
     }
     onReady();
-    return serviceRequest({ method: "POST", path: "/repository/test", body: { url } });
+    return serviceRequest({ method: "POST", path: "/repository/test", body: JSON.stringify({ url }) });
+  }
+  async function runFirstSyncPreview(serviceRequest, url, { machineId: machineId2, onReady = () => {
+  } } = {}) {
+    const health = await serviceRequest({ method: "GET", path: "/health" });
+    if (health.status !== 200) {
+      throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
+    }
+    onReady();
+    return serviceRequest({
+      method: "POST",
+      path: "/repository/preview",
+      body: JSON.stringify({ url, ...machineId2 ? { machineId: machineId2 } : {} })
+    });
+  }
+  async function runFirstSyncConfirmation(serviceRequest, { url, machineId: machineId2, previewId, resolutions, confirmed }, onReady = () => {
+  }) {
+    const health = await serviceRequest({ method: "GET", path: "/health" });
+    if (health.status !== 200) {
+      throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
+    }
+    onReady();
+    return serviceRequest({
+      method: "POST",
+      path: "/repository/confirm",
+      body: JSON.stringify({ url, machineId: machineId2, previewId, resolutions, confirmed })
+    });
+  }
+  async function runRepositoryBootstrap(serviceRequest, { url, machineId: machineId2, previewId, resolutions, confirmed }, onReady = () => {
+  }) {
+    const health = await serviceRequest({ method: "GET", path: "/health" });
+    if (health.status !== 200) {
+      throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
+    }
+    onReady();
+    return serviceRequest({
+      method: "POST",
+      path: "/repository/bootstrap",
+      body: JSON.stringify({ url, machineId: machineId2, previewId, resolutions, confirmed })
+    });
+  }
+  async function runRepositoryApply(serviceRequest, { url, machineId: machineId2, previewId, resolutions, confirmed }, onReady = () => {
+  }) {
+    const health = await serviceRequest({ method: "GET", path: "/health" });
+    if (health.status !== 200) {
+      throw Object.assign(new Error("Local service is not ready"), { code: "SERVICE_NOT_READY" });
+    }
+    onReady();
+    return serviceRequest({
+      method: "POST",
+      path: "/repository/apply",
+      body: JSON.stringify({ url, machineId: machineId2, previewId, resolutions, confirmed })
+    });
+  }
+
+  // src/repository-diagnostics.js
+  var reasons = {
+    "ssh-authentication": "SSH reported public key authentication failure. Check the key available to the service and GitHub account access.",
+    "ssh-host-key": "SSH reported a host key verification problem. Verify GitHub\u2019s host key and this service user\u2019s known_hosts.",
+    dns: "SSH or Git could not resolve the host. Check DNS and network settings.",
+    connection: "The connection failed or was refused. Check the network, SSH port, and firewall.",
+    "repository-not-found": "The repository was not found or the account does not have access. Check the address and permissions.",
+    "ssh-unavailable": "Git could not start SSH. Check that ssh is installed and available to the service.",
+    timeout: "The Git command timed out. Check network connectivity and try again.",
+    "git-unavailable": "Git could not be started by the service.",
+    unknown: "Git failed without a recognized diagnostic. Check the repository, authentication, and network."
+  };
+  function sanitizeRepositoryDiagnostics(value) {
+    if (!value || typeof value !== "object" || !Object.hasOwn(reasons, value.reason) || !["ssh", "https"].includes(value.transport)) return void 0;
+    const diagnostics = { transport: value.transport, reason: value.reason };
+    if (value.transport === "ssh" && ["configured", "not-configured"].includes(value.sshAgent)) {
+      diagnostics.sshAgent = value.sshAgent;
+    }
+    if (Number.isInteger(value.exitCode) && value.exitCode >= 0 && value.exitCode <= 255) {
+      diagnostics.exitCode = value.exitCode;
+    }
+    return diagnostics;
+  }
+  function formatRepositoryDiagnostics(value) {
+    const diagnostics = sanitizeRepositoryDiagnostics(value);
+    if (!diagnostics) return [];
+    const lines = [
+      `Transport: ${diagnostics.transport.toUpperCase()}`,
+      "Command: git ls-remote --heads [repository]",
+      "Authentication prompts: disabled"
+    ];
+    if (diagnostics.transport === "ssh") {
+      lines.push("SSH: BatchMode=yes, ConnectTimeout=5s");
+      if (diagnostics.sshAgent) {
+        lines.push(`SSH agent environment: ${diagnostics.sshAgent === "configured" ? "configured (availability not verified)" : "not configured"}`);
+      }
+    }
+    if (diagnostics.exitCode !== void 0) lines.push(`Git exit code: ${diagnostics.exitCode}`);
+    lines.push(`Diagnostic: ${reasons[diagnostics.reason]}`);
+    return lines;
   }
 
   // src/panel.js
@@ -1992,17 +2131,43 @@ ${GUEST_UI_LOOK_CSS}`;
   var repoFieldRoot = document.querySelector("#repo-field");
   var repoActionRoot = document.querySelector("#repo-action");
   var repoStatus = document.querySelector("#repo-status");
+  var repoLog = document.querySelector("#repo-log");
   var previewActionRoot = document.querySelector("#preview-action");
   var previewStatus = document.querySelector("#preview-status");
   var sourcesRoot = document.querySelector("#sources");
+  var firstSyncActionRoot = document.querySelector("#first-sync-action");
+  var firstSyncStatus = document.querySelector("#first-sync-status");
+  var firstSyncPreviewRoot = document.querySelector("#first-sync-preview");
+  var firstSyncConfirmation = document.querySelector("#first-sync-confirmation");
+  var firstSyncReviewed = document.querySelector("#first-sync-reviewed");
+  var firstSyncConfirmButton = document.querySelector("#first-sync-confirm-button");
+  var firstSyncPushButton = document.querySelector("#first-sync-push-button");
+  var firstSyncApplyButton = document.querySelector("#first-sync-apply-button");
+  var firstSyncConfirmStatus = document.querySelector("#first-sync-confirm-status");
+  var machineIdentityStatus = document.querySelector("#machine-identity-status");
   var mounted = false;
   var repoUrl = "";
   var repoField;
   var repoTestButton;
   var previewButton;
+  var firstSyncButton;
+  var machineId;
+  var activeFirstSyncPreview;
+  var activeFirstSyncPreviewId;
+  var firstSyncChoices = /* @__PURE__ */ Object.create(null);
+  var firstSyncConfirmationPending = false;
+  var firstSyncApproved = false;
+  var firstSyncBootstrapReady = false;
+  var firstSyncPushPending = false;
+  var firstSyncPushed = false;
+  var firstSyncRepositoryEmpty;
+  var firstSyncApplyPending = false;
+  var firstSyncApplied = false;
+  var firstSyncReviewGeneration = 0;
   var sourceLabels = {
     preferences: "OpenChamber preferences",
     opencode: "OpenCode configuration",
+    "opencode-files": "OpenCode agent, command, skill, and plugin files",
     extensions: "Git-installed extensions"
   };
   function renderSources(sources) {
@@ -2020,19 +2185,388 @@ ${GUEST_UI_LOOK_CSS}`;
       sourcesRoot.append(row);
     }
   }
+  function resetFirstSyncReview(message) {
+    firstSyncReviewGeneration += 1;
+    activeFirstSyncPreview = void 0;
+    activeFirstSyncPreviewId = void 0;
+    firstSyncChoices = /* @__PURE__ */ Object.create(null);
+    firstSyncConfirmationPending = false;
+    firstSyncApproved = false;
+    firstSyncBootstrapReady = false;
+    firstSyncPushPending = false;
+    firstSyncPushed = false;
+    firstSyncRepositoryEmpty = void 0;
+    firstSyncApplyPending = false;
+    firstSyncApplied = false;
+    firstSyncPreviewRoot.replaceChildren();
+    firstSyncConfirmation.hidden = true;
+    firstSyncReviewed.checked = false;
+    firstSyncConfirmButton.disabled = true;
+    firstSyncConfirmButton.textContent = "Confirm this plan";
+    firstSyncPushButton.hidden = true;
+    firstSyncPushButton.textContent = "Push initial state";
+    firstSyncApplyButton.hidden = true;
+    firstSyncApplyButton.textContent = "Apply to this machine";
+    firstSyncConfirmStatus.textContent = "";
+    firstSyncButton?.update({ loading: false });
+    if (message) firstSyncStatus.textContent = message;
+  }
+  function isFirstSyncPayload(value) {
+    if (!value || typeof value !== "object" || typeof value.empty !== "boolean" || !Number.isInteger(value.remoteMachineCount) || value.remoteMachineCount < 0 || value.remoteMachineCount > 64 || typeof value.machineIdentityReady !== "boolean" || typeof value.machineRegistered !== "boolean" || typeof value.previewId !== "string" || !/^[a-f0-9]{64}$/.test(value.previewId)) return false;
+    const preview2 = value.comparison;
+    if (!preview2 || typeof preview2 !== "object" || typeof preview2.canConfirm !== "boolean" || !Array.isArray(preview2.items) || preview2.items.length > 200 || !Array.isArray(preview2.blockedSources) || ["localOnly", "remoteOnly", "conflicts", "unchanged", "unsupportedItems", "incompleteItems", "omittedItems"].some((key) => !Number.isInteger(preview2[key]) || preview2[key] < 0)) return false;
+    return preview2.items.every((item) => item && typeof item === "object" && typeof item.key === "string" && item.key.length <= 1200 && typeof item.path === "string" && item.path.length <= 600 && ["file", "setting"].includes(item.kind) && ["upload", "download", "conflict"].includes(item.action) && typeof item.complete === "boolean" && ["local", "remote"].every((side) => item[side] && typeof item[side] === "object" && typeof item[side].present === "boolean" && typeof item[side].deleted === "boolean" && typeof item[side].preview === "string" && item[side].preview.length <= 32 * 1024 && typeof item[side].complete === "boolean"));
+  }
+  function updateFirstSyncConfirmation() {
+    firstSyncReviewed.disabled = firstSyncConfirmationPending;
+    firstSyncPreviewRoot.querySelectorAll(".sync-conflict-choices input").forEach((input) => {
+      input.disabled = firstSyncConfirmationPending;
+    });
+    firstSyncConfirmButton.disabled = firstSyncConfirmationPending || firstSyncApproved || !canConfirmFirstSync(
+      activeFirstSyncPreview,
+      firstSyncChoices,
+      firstSyncReviewed.checked
+    );
+    firstSyncPushButton.hidden = !(firstSyncApproved && firstSyncBootstrapReady);
+    if (!firstSyncPushButton.hidden) {
+      firstSyncPushButton.disabled = firstSyncPushPending || firstSyncPushed;
+    }
+    firstSyncApplyButton.hidden = !(firstSyncApproved && firstSyncRepositoryEmpty === false) || firstSyncApplied;
+    if (!firstSyncApplyButton.hidden) {
+      firstSyncApplyButton.disabled = firstSyncApplyPending;
+    }
+  }
+  function renderPreviewValue(title, value) {
+    const section = document.createElement("section");
+    section.className = "sync-value";
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    const content = document.createElement("pre");
+    content.textContent = value.present ? value.preview : value.deleted ? "Deleted in the repository." : "Not present.";
+    section.append(heading, content);
+    return section;
+  }
+  function renderFirstSyncPreview(payload) {
+    const comparison = payload.comparison;
+    activeFirstSyncPreview = comparison;
+    activeFirstSyncPreviewId = payload.previewId;
+    firstSyncChoices = /* @__PURE__ */ Object.create(null);
+    firstSyncApproved = false;
+    firstSyncBootstrapReady = false;
+    firstSyncPushPending = false;
+    firstSyncPushed = false;
+    firstSyncRepositoryEmpty = payload.empty;
+    firstSyncApplyPending = false;
+    firstSyncApplied = false;
+    firstSyncPreviewRoot.replaceChildren();
+    firstSyncConfirmStatus.textContent = "";
+    firstSyncReviewed.checked = false;
+    const summary = document.createElement("p");
+    summary.className = "sync-summary";
+    summary.textContent = `${payload.empty ? "The repository has no branch history yet. " : `Compared ${payload.remoteMachineCount} remote machine${payload.remoteMachineCount === 1 ? "" : "s"}. `}Proposed: ${comparison.localOnly} upload${comparison.localOnly === 1 ? "" : "s"}, ${comparison.remoteOnly} download${comparison.remoteOnly === 1 ? "" : "s"}, ${comparison.conflicts} conflict${comparison.conflicts === 1 ? "" : "s"}, ${comparison.unchanged} unchanged.`;
+    firstSyncPreviewRoot.append(summary);
+    const identity = document.createElement("p");
+    identity.className = payload.machineIdentityReady ? "sync-summary" : "sync-warning";
+    identity.textContent = !payload.machineIdentityReady ? "No stable device identity is available; confirmation and bootstrap are disabled." : payload.machineRegistered ? "This device already has a state file in the repository." : "This device does not yet have a state file in the repository.";
+    firstSyncPreviewRoot.append(identity);
+    if (comparison.blockedSources.length > 0) {
+      const warning = document.createElement("p");
+      warning.className = "sync-warning";
+      warning.textContent = `Review blocked: these local sources are missing or unavailable: ${comparison.blockedSources.map((id) => sourceLabels[id] ?? "Unknown source").join(", ")}.`;
+      firstSyncPreviewRoot.append(warning);
+    }
+    for (const [count, label, noun] of [
+      [comparison.unsupportedItems, "Unsupported remote items", "remote item"],
+      [comparison.incompleteItems, "Items withheld from preview", "item"],
+      [comparison.omittedItems, "Changes omitted by preview limits", "change"]
+    ]) {
+      if (!count) continue;
+      const warning = document.createElement("p");
+      warning.className = "sync-warning";
+      warning.textContent = `${label}: ${count} ${noun}${count === 1 ? "" : "s"}. Confirmation is disabled.`;
+      firstSyncPreviewRoot.append(warning);
+    }
+    if (comparison.items.length === 0 && comparison.unsupportedItems === 0) {
+      const empty = document.createElement("p");
+      empty.className = "sync-empty";
+      empty.textContent = "No differences to review.";
+      firstSyncPreviewRoot.append(empty);
+    }
+    const list = document.createElement("ol");
+    list.className = "sync-change-list";
+    comparison.items.forEach((item, index) => {
+      const row = document.createElement("li");
+      row.className = "sync-change";
+      const header = document.createElement("div");
+      header.className = "sync-change-header";
+      const title = document.createElement("h3");
+      title.textContent = item.path;
+      const action = document.createElement("span");
+      action.className = `sync-action sync-action-${item.action}`;
+      action.textContent = item.action === "upload" ? "Upload to repository" : item.action === "download" ? "Apply to this machine" : "Choose conflict resolution";
+      header.append(title, action);
+      row.append(header);
+      const values = document.createElement("details");
+      values.className = "sync-values";
+      const valuesSummary = document.createElement("summary");
+      valuesSummary.textContent = "Inspect local and repository values";
+      values.append(valuesSummary, renderPreviewValue("This machine", item.local), renderPreviewValue("Repository", item.remote));
+      row.append(values);
+      if (item.action === "conflict") {
+        const choices = document.createElement("fieldset");
+        choices.className = "sync-conflict-choices";
+        const legend = document.createElement("legend");
+        legend.textContent = "Resolve this conflict";
+        choices.append(legend);
+        for (const choice of ["local", "remote"]) {
+          const label = document.createElement("label");
+          const input = document.createElement("input");
+          input.type = "radio";
+          input.name = `sync-conflict-${index}`;
+          input.value = choice;
+          input.checked = firstSyncChoices[item.key] === choice;
+          input.addEventListener("change", () => {
+            firstSyncChoices[item.key] = choice;
+            firstSyncApproved = false;
+            firstSyncConfirmStatus.textContent = "";
+            updateFirstSyncConfirmation();
+          });
+          label.append(input, document.createTextNode(choice === "local" ? "Keep this machine\u2019s value" : item.remote.deleted ? "Apply repository deletion" : "Use repository value"));
+          choices.append(label);
+        }
+        row.append(choices);
+      }
+      list.append(row);
+    });
+    if (comparison.items.length > 0) firstSyncPreviewRoot.append(list);
+    firstSyncConfirmation.hidden = false;
+    firstSyncStatus.textContent = "Comparison ready. Nothing has been uploaded or changed.";
+    updateFirstSyncConfirmation();
+  }
+  function firstSyncErrorMessage(code) {
+    const messages = {
+      "invalid-repository-url": "Enter a credential-free GitHub HTTPS URL or SSH address.",
+      "git-not-installed": "Git is not available to the OpenChamber service.",
+      "git-timeout": "The read-only repository comparison timed out. Retry when the network is stable.",
+      "git-access-failed": "Git could not read this repository. Check the address and this machine\u2019s access.",
+      "remote-state-invalid": "The repository contains unsupported or malformed sync state. No changes were made.",
+      "remote-state-too-large": "The repository state exceeds the safe preview limit. No changes were made.",
+      "remote-state-unavailable": "The repository server could not provide bounded state data. No changes were made.",
+      "preview-stale": "Local or remote state changed after this preview. Run the comparison again before confirming.",
+      "preview-not-confirmable": "This comparison is incomplete or missing a conflict choice. Refresh it and review every change.",
+      "repository-changed": "The repository changed during the push or no longer matches this preview. Run the comparison again; the remote was not changed.",
+      "git-push-failed": "Git could not push to the repository. Check write access for this machine; the remote was not changed.",
+      "state-too-large": "The prepared initial state exceeds the safe push limit. Nothing was uploaded.",
+      "nothing-to-apply": "This confirmed plan has no changes to apply to this machine.",
+      "apply-target-unavailable": "A local target file is missing, unreadable, or unsafe to replace. Nothing was changed.",
+      "apply-too-large": "A merged file would exceed the safe size limit. Nothing was changed.",
+      "apply-recovery-required": "An earlier interrupted apply left a recovery marker that could not be resolved. Nothing was changed; inspect the OpenChamber config directory.",
+      "apply-failed": "Applying the confirmed changes failed partway. Interrupted applies are rolled back on the next apply attempt."
+    };
+    return messages[code] ?? "Could not prepare a safe first-sync comparison. No changes were made.";
+  }
+  async function previewFirstSync() {
+    const url = repoUrl.trim();
+    if (!url) {
+      resetFirstSyncReview("Enter a repository address before comparing.");
+      return;
+    }
+    resetFirstSyncReview("Preparing a read-only local and repository comparison\u2026");
+    const generation = firstSyncReviewGeneration;
+    firstSyncButton.update({ loading: true });
+    try {
+      const response = await runFirstSyncPreview((request) => host.serviceRequest(request), url, { machineId });
+      if (generation !== firstSyncReviewGeneration) return;
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch {
+        throw new Error("invalid-preview");
+      }
+      if (response.status !== 200) {
+        resetFirstSyncReview(firstSyncErrorMessage(payload.error));
+        return;
+      }
+      if (!isFirstSyncPayload(payload)) throw new Error("invalid-preview");
+      renderFirstSyncPreview(payload);
+    } catch (error) {
+      if (generation === firstSyncReviewGeneration) {
+        resetFirstSyncReview(error?.code ? repositoryServiceErrorMessage(error) : "Could not prepare a safe first-sync comparison. No changes were made.");
+      }
+    } finally {
+      if (generation === firstSyncReviewGeneration) firstSyncButton.update({ loading: false });
+    }
+  }
+  function confirmFirstSyncPlan() {
+    if (firstSyncConfirmationPending || firstSyncApproved || !canConfirmFirstSync(activeFirstSyncPreview, firstSyncChoices, firstSyncReviewed.checked)) return;
+    void submitFirstSyncConfirmation();
+  }
+  async function submitFirstSyncConfirmation() {
+    const generation = firstSyncReviewGeneration;
+    const previewId = activeFirstSyncPreviewId;
+    const url = repoUrl.trim();
+    firstSyncConfirmationPending = true;
+    firstSyncConfirmButton.textContent = "Rechecking preview\u2026";
+    updateFirstSyncConfirmation();
+    const resolutions = activeFirstSyncPreview.items.filter((item) => item.action === "conflict").map((item) => firstSyncChoices[item.key] === "local" ? "L" : "R").join("");
+    try {
+      const response = await runFirstSyncConfirmation((request) => host.serviceRequest(request), {
+        url,
+        machineId,
+        previewId,
+        resolutions,
+        confirmed: true
+      });
+      if (generation !== firstSyncReviewGeneration) return;
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch {
+        payload = {};
+      }
+      if (response.status !== 200 || payload.confirmed !== true || payload.changesMade !== false) {
+        if (response.status === 409 || payload.error === "preview-stale") {
+          resetFirstSyncReview(firstSyncErrorMessage("preview-stale"));
+        } else {
+          firstSyncConfirmStatus.textContent = response.status === 422 ? firstSyncErrorMessage(payload.error) : repositoryServiceErrorMessage({ code: payload.error });
+        }
+        return;
+      }
+      firstSyncApproved = true;
+      firstSyncConfirmButton.textContent = "Plan confirmed";
+      if (payload.bootstrap && typeof payload.bootstrap.path === "string" && payload.bootstrap.branch === "main" && Number.isInteger(payload.bootstrap.entryCount)) {
+        firstSyncBootstrapReady = true;
+        firstSyncConfirmStatus.textContent = `Initial state prepared at ${payload.bootstrap.path} (${payload.bootstrap.entryCount} entries). Nothing has been uploaded yet. Pushing is a separate step that writes only that file to the repository.`;
+      } else {
+        firstSyncConfirmStatus.textContent = "The service rechecked and confirmed this plan. Applying it to this machine is a separate step; nothing has been changed yet.";
+      }
+    } catch (error) {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncConfirmStatus.textContent = repositoryServiceErrorMessage(error);
+      }
+    } finally {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncConfirmationPending = false;
+        if (!firstSyncApproved && activeFirstSyncPreview) firstSyncConfirmButton.textContent = "Confirm this plan";
+        updateFirstSyncConfirmation();
+      }
+    }
+  }
+  async function submitFirstSyncBootstrap() {
+    if (!firstSyncApproved || firstSyncPushed || firstSyncPushPending || !firstSyncBootstrapReady) return;
+    const generation = firstSyncReviewGeneration;
+    const previewId = activeFirstSyncPreviewId;
+    const url = repoUrl.trim();
+    firstSyncPushPending = true;
+    firstSyncPushButton.textContent = "Pushing initial state\u2026";
+    updateFirstSyncConfirmation();
+    const resolutions = activeFirstSyncPreview.items.filter((item) => item.action === "conflict").map((item) => firstSyncChoices[item.key] === "local" ? "L" : "R").join("");
+    try {
+      const response = await runRepositoryBootstrap((request) => host.serviceRequest(request), {
+        url,
+        machineId,
+        previewId,
+        resolutions,
+        confirmed: true
+      });
+      if (generation !== firstSyncReviewGeneration) return;
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch {
+        payload = {};
+      }
+      if (response.status !== 200 || payload.confirmed !== true || payload.changesMade !== true) {
+        if (response.status === 409) {
+          resetFirstSyncReview(firstSyncErrorMessage(payload.error ?? "preview-stale"));
+        } else {
+          firstSyncConfirmStatus.textContent = firstSyncErrorMessage(payload.error);
+        }
+        return;
+      }
+      firstSyncPushed = true;
+      firstSyncPushButton.textContent = "Initial state pushed";
+      const commit = typeof payload.commit === "string" && /^[a-f0-9]{40}$|^[a-f0-9]{64}$/i.test(payload.commit) ? payload.commit.slice(0, 7) : void 0;
+      firstSyncConfirmStatus.textContent = `Initial state pushed to the repository${commit ? ` (commit ${commit})` : ""}. No local files were changed.`;
+    } catch (error) {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncConfirmStatus.textContent = repositoryServiceErrorMessage(error);
+      }
+    } finally {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncPushPending = false;
+        if (!firstSyncPushed) firstSyncPushButton.textContent = "Push initial state";
+        updateFirstSyncConfirmation();
+      }
+    }
+  }
+  async function submitFirstSyncApply() {
+    if (!firstSyncApproved || firstSyncApplied || firstSyncApplyPending || firstSyncRepositoryEmpty !== false) return;
+    const generation = firstSyncReviewGeneration;
+    const previewId = activeFirstSyncPreviewId;
+    const url = repoUrl.trim();
+    firstSyncApplyPending = true;
+    firstSyncApplyButton.textContent = "Applying changes\u2026";
+    updateFirstSyncConfirmation();
+    const resolutions = activeFirstSyncPreview.items.filter((item) => item.action === "conflict").map((item) => firstSyncChoices[item.key] === "local" ? "L" : "R").join("");
+    try {
+      const response = await runRepositoryApply((request) => host.serviceRequest(request), {
+        url,
+        machineId,
+        previewId,
+        resolutions,
+        confirmed: true
+      });
+      if (generation !== firstSyncReviewGeneration) return;
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch {
+        payload = {};
+      }
+      if (response.status !== 200 || payload.confirmed !== true || payload.changesMade !== true) {
+        if (response.status === 409) {
+          resetFirstSyncReview(firstSyncErrorMessage(payload.error ?? "preview-stale"));
+        } else {
+          firstSyncConfirmStatus.textContent = firstSyncErrorMessage(payload.error);
+        }
+        return;
+      }
+      firstSyncApplied = true;
+      firstSyncApplyButton.textContent = "Changes applied";
+      const count = Number.isInteger(payload.applied) && payload.applied >= 0 ? payload.applied : void 0;
+      firstSyncConfirmStatus.textContent = `Applied ${count ?? "the approved"} change${count === 1 ? "" : "s"} from the repository to this machine. The repository was not changed; push this machine's state in a later comparison.`;
+    } catch (error) {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncConfirmStatus.textContent = repositoryServiceErrorMessage(error);
+      }
+    } finally {
+      if (generation === firstSyncReviewGeneration) {
+        firstSyncApplyPending = false;
+        if (!firstSyncApplied) firstSyncApplyButton.textContent = "Apply to this machine";
+        updateFirstSyncConfirmation();
+      }
+    }
+  }
   function repoErrorMessage(error, remote) {
     if (error === "invalid-repository-url") return "Enter a GitHub HTTPS URL or SSH address such as git@github.com:owner/repo.git.";
     if (error === "git-not-installed") return "Git is not available to the OpenChamber service on this machine.";
     if (error === "git-timeout") return "Git did not respond in time. Check your network and try again.";
-    if (remote.startsWith("git@github.com:")) return "SSH access failed. Check that your key is accepted by GitHub and github.com is trusted in ~/.ssh/known_hosts. SSH agent-only or passphrase-prompted keys are not available to the service.";
+    if (remote.startsWith("git@github.com:")) return "SSH access failed. See Git test diagnostics for more information.";
     return "Git could not access this repository. Check the URL and authenticate with this machine\u2019s Git credential helper, then retry.";
   }
   async function testRepository() {
     const url = repoUrl.trim();
     if (!url) {
       repoStatus.textContent = "Enter a GitHub repository URL first.";
+      repoLog.textContent = "No test started: repository address is empty.";
       return;
     }
+    const log = ["Starting local Git service\u2026"];
+    const updateLog = () => {
+      repoLog.textContent = log.join("\n");
+    };
+    updateLog();
     repoTestButton.update({ loading: true });
     repoStatus.textContent = "Starting local Git service\u2026";
     let payload;
@@ -2042,15 +2576,23 @@ ${GUEST_UI_LOOK_CSS}`;
         url,
         () => {
           repoStatus.textContent = "Testing read access with Git\u2026";
+          log.push("Service ready. Testing repository read access\u2026");
+          updateLog();
         }
       );
       payload = JSON.parse(response.body);
       if (response.status !== 200 || payload.accessible !== true || typeof payload.url !== "string") {
         repoStatus.textContent = repoErrorMessage(payload.error, url);
+        log.push("Test failed.", ...formatRepositoryDiagnostics(payload.diagnostics), repoStatus.textContent);
+        updateLog();
         return;
       }
+      log.push("Git repository read access succeeded. No files were changed.");
+      updateLog();
     } catch (error) {
       repoStatus.textContent = repositoryServiceErrorMessage(error);
+      log.push(`Test failed: ${repoStatus.textContent}`);
+      updateLog();
       return;
     } finally {
       repoTestButton.update({ loading: false });
@@ -2081,13 +2623,24 @@ ${GUEST_UI_LOOK_CSS}`;
       previewButton.update({ loading: false });
     }
   }
-  async function mount() {
+  async function mount(context) {
     if (mounted) return;
     mounted = true;
     try {
       const savedUrl = await host.storage.get("repositoryUrl");
       if (typeof savedUrl === "string") repoUrl = savedUrl;
     } catch {
+    }
+    try {
+      machineId = await getOrCreateMachineId({
+        storage: host.storage,
+        deviceStorageAvailable: context?.features?.deviceStorage === true,
+        lockManager: globalThis.navigator?.locks
+      });
+      machineIdentityStatus.textContent = `Stable per-device identity ${machineId.slice(0, 8)}\u2026 is ready for repository bootstrap.`;
+    } catch {
+      machineId = void 0;
+      machineIdentityStatus.textContent = "Stable per-device identity is unavailable on this host; repository bootstrap is disabled.";
     }
     repoField = mountTextField(repoFieldRoot, {
       label: "GitHub repository address",
@@ -2098,6 +2651,7 @@ ${GUEST_UI_LOOK_CSS}`;
       onChange: (value) => {
         repoUrl = value;
         repoField.update({ value });
+        resetFirstSyncReview("Repository address changed. Run a new first-sync comparison.");
       }
     });
     repoTestButton = mountButton(repoActionRoot, {
@@ -2110,9 +2664,23 @@ ${GUEST_UI_LOOK_CSS}`;
       variant: "secondary",
       onClick: () => void preview()
     });
+    firstSyncButton = mountButton(firstSyncActionRoot, {
+      label: "Compare with repository",
+      variant: "secondary",
+      onClick: () => void previewFirstSync()
+    });
+    firstSyncReviewed.addEventListener("change", () => {
+      firstSyncApproved = false;
+      firstSyncConfirmStatus.textContent = "";
+      firstSyncConfirmButton.textContent = "Confirm this plan";
+      updateFirstSyncConfirmation();
+    });
+    firstSyncConfirmButton.addEventListener("click", confirmFirstSyncPlan);
+    firstSyncPushButton.addEventListener("click", () => void submitFirstSyncBootstrap());
+    firstSyncApplyButton.addEventListener("click", () => void submitFirstSyncApply());
   }
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
-    if (root) void mount();
+    if (root) void mount(context);
   });
 })();

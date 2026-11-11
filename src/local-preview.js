@@ -7,10 +7,11 @@ import {
   selectExtensionRepositories,
   selectPortablePreferences,
 } from './snapshot.js';
+import { readPortableOpenCodeFiles } from './portable-files.js';
 
 const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
 
-async function readJsonFile(filePath) {
+export async function readJsonFile(filePath) {
   let handle;
   try {
     handle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -43,14 +44,19 @@ export async function createLocalPreview({ openChamberDir, openCodeDir }) {
     throw new TypeError('OpenChamber and OpenCode config directories are required');
   }
 
-  const [preferences, opencode, extensions] = await Promise.all([
+  const [preferences, opencode, extensions, opencodeFiles] = await Promise.all([
     sourcePreview(path.join(openChamberDir, 'preferences.json'), 'preferences', (value) =>
       Object.keys(selectPortablePreferences(value).fields).length),
     sourcePreview(path.join(openCodeDir, 'opencode.json'), 'opencode', (value) =>
       Object.keys(sanitizeOpenCodeConfig(value)).length),
     sourcePreview(path.join(openChamberDir, 'extensions.json'), 'extensions', (value) =>
       selectExtensionRepositories(value).length),
+    readPortableOpenCodeFiles(openCodeDir).then((files) => ({
+      id: 'opencode-files',
+      status: files.status,
+      portableItems: files.status === 'ready' ? Object.keys(files.values).length : 0,
+    })),
   ]);
 
-  return { sources: [preferences, opencode, extensions] };
+  return { sources: [preferences, opencode, opencodeFiles, extensions] };
 }
